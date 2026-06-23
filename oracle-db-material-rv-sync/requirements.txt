@@ -1,0 +1,4 @@
+msal
+requests
+python-dotenv
+oracledb
