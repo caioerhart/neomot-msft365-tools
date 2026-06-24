@@ -54,8 +54,7 @@ SELECT
     TTIPOS_NF.COD_TP_NF AS "cod_tp_nf",
     TPEDIDOS_VENDA.USUARIO AS "user_sistema",
     TDIVISOES_VENDAS.COD_DIVD || ' - ' || TDIVISOES_VENDAS.DESCRICAO AS "divisao_vendas",
-    NULL AS "user",
-    NULL AS "status_bi"
+    NULL AS "user"
 FROM TEMPRESAS
 JOIN TNFS_SAIDA ON TEMPRESAS.ID = TNFS_SAIDA.EMPR_ID
 JOIN TCLIENTES ON TCLIENTES.ID = TNFS_SAIDA.CLI_ID
@@ -250,6 +249,15 @@ def get_table_range_address(token: str, drive_id: str, item_id: str, session_id:
     return data["address"]
 
 
+def get_table_column_count(token: str, drive_id: str, item_id: str, session_id: str, table_id: str) -> int:
+    url = f"{GRAPH_BASE}/drives/{drive_id}/items/{item_id}/workbook/tables/{table_id}/range"
+    data = req("GET", url, graph_headers(token, session_id))
+    column_count = data.get("columnCount")
+    if not isinstance(column_count, int) or column_count <= 0:
+        raise RuntimeError(f"Nao foi possivel identificar a quantidade de colunas da tabela: {data}")
+    return column_count
+
+
 def parse_range_start_row(address: str) -> int:
     _, _, cells = address.rpartition("!")
     first_cell = cells.split(":", 1)[0]
@@ -298,6 +306,17 @@ def filter_duplicate_rows(rows: list[list[Any]], existing_rows: list[list[Any]])
         existing_keys.add(key)
         unique_rows.append(row)
     return unique_rows
+
+
+def validate_rows_match_table(rows: list[list[Any]], table_column_count: int) -> None:
+    mismatched_row = next((row for row in rows if len(row) != table_column_count), None)
+    if mismatched_row is None:
+        return
+    raise RuntimeError(
+        "Quantidade de colunas retornada pelo Oracle nao confere com a tabela Excel: "
+        f"Oracle={len(mismatched_row)}, Excel={table_column_count}. "
+        "Verifique o SELECT e as colunas da tabela antes de inserir."
+    )
 
 
 def clear_table_rows(token: str, drive_id: str, item_id: str, session_id: str, table_id: str, row_count: int) -> None:
@@ -478,6 +497,8 @@ def main() -> None:
             current_row_count = len(existing_rows)
 
         range_address = get_table_range_address(token, drive_id, item_id, session_id, table_id)
+        table_column_count = get_table_column_count(token, drive_id, item_id, session_id, table_id)
+        validate_rows_match_table(rows, table_column_count)
         header_row = parse_range_start_row(range_address)
         first_new_worksheet_row = header_row + 1 + current_row_count
 
